@@ -5,4 +5,3 @@
 [node name="Main" type="Node" unique_id=349601240]
 
 [node name="Game" parent="." unique_id=854732979 instance=ExtResource("1")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0778079, 0.001045227, -0.40577587)

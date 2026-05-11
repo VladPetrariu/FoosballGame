@@ -16,9 +16,20 @@ const GOAL_DEPTH: float = 0.08
 
 # --- Ball ---
 const BALL_RADIUS: float = 0.017
-const BALL_MAX_SPEED: float = 3.0
+const BALL_MAX_SPEED: float = 5.0
 const BALL_FRICTION: float = 0.985
 const BALL_WALL_RESTITUTION: float = 0.75
+const BALL_DRIFT_ACCELERATION: float = 0.02    # m/s² very gentle drift so ball never sits still
+const BALL_DRIFT_PHASE_SPEED: float = 0.3      # rad/s rotation of drift direction
+const BALL_DRIFT_ACTIVATION_SPEED: float = 0.1 # m/s — drift only kicks in below this speed
+
+# --- Figure Collision ---
+const FIGURE_BODY_HALF_WIDTH: float = 0.015     # 30mm body / 2 (visual reference)
+const FIGURE_BODY_HALF_DEPTH: float = 0.022     # Z half-extent with small safety margin
+const FIGURE_COLLISION_HALF_REACH: float = 0.085  # sqrt(half_w^2 + body_height^2) + margin — covers the rotated body at any angle so the ball can't phase through during a swing
+const FIGURE_FOOT_LENGTH: float = 0.08          # Lever arm for kick power (body height)
+const FIGURE_KICK_POWER_SCALE: float = 1.5      # Tunable shot-power multiplier
+const BALL_MIN_BOUNCE_SPEED: float = 0.2        # Floor after figure collision
 
 # --- Bars ---
 # Interleaved bar layout from left to right: [player, bar_type, x_position, figure_count]
@@ -34,7 +45,6 @@ const BAR_CONFIG: Array = [
 	[PLAYER_2, 0,  0.50, 1],  # P2 Goalie
 ]
 
-const BAR_SLIDE_RANGE: float = 0.10
 const BAR_MAX_ROTATION_SPEED: float = 20.0
 const BAR_ROTATION_RESET_SPEED: float = 10.0
 

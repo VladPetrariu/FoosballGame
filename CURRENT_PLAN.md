@@ -1,215 +1,227 @@
-# Foosball Game - Phase 02 Implementation Plan
+# Foosball Game - Phase 03 Implementation Plan
 
 ## Project Status
 
 **Completed:** Phase 01 - Project Scaffold and Table
-- Godot 4.6 project structure established
-- 3D foosball table with proper dimensions (1.20m x 0.68m)
-- Ball visual object created
-- Physics world class (stub for Phase 03)
-- Game manager with score tracking
-- HUD with score display
-- Constants defined for all game parameters
-- Camera and lighting configured
+- Godot 4.6 project structure established (autoloads, scenes/, scripts/, assets/)
+- 3D foosball table (1.20m × 0.68m) with surface, walls, goal openings, legs, center line
+- Ball visual (sphere, 0.017m radius)
+- HUD with score display, wired to `GameManager.on_goal_scored`
+- Camera (top-down with slight angle) and lighting (directional + 2 spotlights)
+- Constants autoload with physics, table, ball, bar, scoring, network parameters
 
-**Current Phase:** Phase 02 - Bars, Figures, and Controls
+**Completed:** Phase 02 - Bars, Figures, and Controls
+- 8 bars spawned via interleaved `BAR_CONFIG` (4 per player, alternating along X)
+- Per-bar figure spawning (1/2/5/3 figures for goalie/defense/midfield/attack)
+- Red (P1) / blue (P2) figure materials, silver metallic rod, emissive selection indicator
+- `InputHandler` with mouse capture, KEY_1-4 bar selection, ESC release, left-mouse hold for rotation, vertical mouse motion always slides
+- Bar state array (z_offset, rotation, rotation_speed) updated from input
+- Smooth return-to-vertical for inactive bars (with rotation normalized to [-π, π] for shortest path)
+- Selection indicator visibility synced to active bar each frame
 
-**Goal:** Implement 8 foosball bars (4 per player) with attached figures, player controls (keyboard bar selection + mouse rotation/sliding), and reset-to-vertical mechanic.
+**Current Phase:** Phase 03 - Ball Physics
+
+**Goal:** Replace the `PhysicsWorld` stub with a custom deterministic 2D (XZ-plane) ball simulation: movement + friction, swept circle-vs-segment wall collisions, swept circle-vs-AABB figure collisions where bar `rotation_speed` translates into shot power, and goal detection.
+
+---
+
+## Implementation Divergences from Phase 02 Plan (carry forward)
+
+Things the codebase does differently from the original plan text — physics work in Phase 03 must respect these:
+
+1. **`BAR_CONFIG` interleaved layout** — `constants.gd` stores all 8 bars as `[player, bar_type, x_position, fig_count]` rows ordered by world X position. Physics iterates `bars[]` (which mirrors `BAR_CONFIG`) directly, not separate P1/P2 arrays.
+2. **`table.gd` exposes `get_goal_rects()`**, not `get_goal_zones()`. Physics will call the existing name.
+3. **Wall segments currently lack goal-box internal walls.** The current `get_wall_segments()` returns only the 6 outer-perimeter segments (top, bottom, left-upper, left-lower, right-upper, right-lower). Phase 03 must add the 3-walls-per-goal back/side segments so the ball settles inside the goal box after a score, instead of flying off into infinity.
+4. **`physics_world.gd` has `class_name PhysicsWorld` with no `extends`** (implicit RefCounted). `game.gd` instantiates it with `PhysicsWorld.new()`. Keep this structure — do not convert to a Node.
+5. **`physics_world.step()` currently takes no parameter.** Phase 03 changes the signature to `step(dt: float)` and `game.gd` will pass `Constants.PHYSICS_DT`.
 
 ---
 
 ## Existing Files to Modify
 
-### 1. `scripts/game/bar.gd`
-**Current state:** Placeholder with just 4 variables
-**Required changes:** Complete rewrite with full bar logic
+### 1. `scripts/game/physics_world.gd`
+**Current state:** Stub with `ball_pos`, `ball_vel`, `wall_segments`, empty `step()`, `get_ball_3d_position()`.
+**Required changes:** Full ball simulation — friction, swept collision (walls + figures), goal detection, shot power resolution.
 
-### 2. `scripts/game/game.gd`
-**Current state:** Basic game loop with ball/physics
-**Required changes:** Add bar spawning, input handling, state management
+### 2. `scripts/game/table.gd`
+**Current state:** Returns outer wall segments and goal rects.
+**Required changes:** Extend `get_wall_segments()` to include 3 internal walls per goal box (back wall + two side walls).
+
+### 3. `scripts/game/game.gd`
+**Current state:** Calls `physics_world.step()` (no args), reads `get_ball_3d_position()`, calls `reset_ball()` directly.
+**Required changes:** Pass dt to `step()`, pass bar references on `initialize()`, react to `goal_scored` result, drive ball visual rotation.
+
+### 4. `scripts/game/ball.gd`
+**Current state:** Just `update_position(pos)`.
+**Required changes:** Add `update_rotation(vel, dt)` so the ball mesh visually rolls when moving (cosmetic).
+
+### 5. `scripts/autoload/constants.gd`
+**Current state:** Has all physics tunables already.
+**Required changes:** Add figure-collision constants (`FIGURE_BODY_HALF_WIDTH`, `FIGURE_BODY_HALF_DEPTH`, `FIGURE_FOOT_LENGTH`, `FIGURE_KICK_POWER_SCALE`, `BALL_MIN_BOUNCE_SPEED`). Keep them in one place so Phase 06 fixed-point conversion can find them.
 
 ---
 
 ## New Files to Create
 
-### 1. `scenes/game/bar.tscn`
-Bar scene with Rod, Figures container, SelectionIndicator
-
-### 2. `scripts/game/input_handler.gd`
-Input handler for keyboard bar selection and mouse control
+None. Phase 03 is a focused rewrite of the physics stub.
 
 ---
 
 ## Implementation Steps
 
-### Step 1: Create `scenes/game/bar.tscn`
+### Step 1: Add figure-collision constants (`constants.gd`)
 
-```
-Bar (Node3D) [script: bar.gd]
-├── Rod (MeshInstance3D)
-│   - CylinderMesh, radius 0.004, height 0.78 (TABLE_WIDTH + 0.10)
-│   - Rotated 90° on X to lie along Z-axis
-│   - StandardMaterial3D: metallic=0.8, roughness=0.3, silver color
-├── Figures (Node3D)
-│   - Empty container, figures added dynamically
-└── SelectionIndicator (MeshInstance3D)
-    - Small sphere or torus mesh
-    - Emissive yellow material
-    - Initially hidden
-```
+Append under the `# --- Ball ---` block (or a new `# --- Figure Collision ---` block):
 
-### Step 2: Rewrite `scripts/game/bar.gd`
-
-**Properties:**
-- player: int (0=P1, 1=P2)
-- bar_index: int (0-3: goalie, defense, midfield, attack)
-- z_offset: float (slide position)
-- rotation_angle: float (radians, 0=vertical)
-- rotation_speed: float (angular velocity)
-- figure_count: int (1, 2, 5, or 3)
-- figure_base_positions: Array[float]
-- is_selected: bool
-
-**Methods:**
-- `setup(p_player, p_bar_index, p_x_pos, p_fig_count)` - Initialize bar
-- `_create_figures()` - Spawn figure meshes evenly spaced
-- `_make_figure_mesh()` - Create single figure (BoxMesh 0.015x0.05x0.02)
-- `_setup_rod()` - Configure rod mesh and material
-- `_setup_selection_indicator()` - Configure indicator mesh
-- `apply_state(z_offset, rotation, rot_speed)` - Update transforms
-- `get_figure_world_positions()` - Return Array of Vector2 (x,z)
-- `get_figure_collision_rect(fig_index)` - Return Rect2 for collision
-- `update_selection_visual()` - Toggle indicator visibility
-
-**Figure spacing calculation:**
-- usable_range = 0.60m
-- spacing = usable_range / (figure_count + 1)
-- Each figure Z = -usable_range/2 + spacing * (i + 1)
-
-**Materials:**
-- Rod: Silver metallic (Color(0.75, 0.75, 0.78))
-- P1 Figures: Red (#CC2200)
-- P2 Figures: Blue (#0044CC)
-- Selection: Emissive yellow
-
-### Step 3: Create `scripts/game/input_handler.gd`
-
-**Signals:**
-- `bar_selected(player: int, bar_index: int)`
-- `bar_input(player: int, rotation_delta: float, slide_delta: float)`
-- `bar_released(player: int)`
-
-**Properties:**
-- active_bar_index: int = 0
-- is_mouse_held: bool = false
-- mouse_sensitivity_rotation: float = 0.005
-- mouse_sensitivity_slide: float = 0.0003
-
-**Input handling:**
-- `_ready()`: Set mouse mode to MOUSE_MODE_CAPTURED
-- `_unhandled_input(event)`:
-  - KEY_1 through KEY_4: Select bar 0-3, emit bar_selected
-  - KEY_ESCAPE: Release mouse (MOUSE_MODE_VISIBLE)
-  - MOUSE_BUTTON_LEFT press/release: Toggle is_mouse_held, emit bar_released
-  - InputEventMouseMotion while held: Calculate deltas, emit bar_input
-
-### Step 4: Update `scripts/game/game.gd`
-
-**New properties:**
-- bars: Array = [] (all 8 bar nodes)
-- p1_bars: Array = []
-- p2_bars: Array = []
-- bar_states: Array = [] (8 state dictionaries)
-- input_handler: InputHandler
-
-**Bar state structure:**
 ```gdscript
-{
-    "z_offset": 0.0,
-    "rotation": 0.0,
-    "rotation_speed": 0.0
-}
+# --- Figure Collision ---
+const FIGURE_BODY_HALF_WIDTH: float = 0.0075    # 15mm body / 2
+const FIGURE_BODY_HALF_DEPTH: float = 0.01      # 20mm body / 2
+const FIGURE_FOOT_LENGTH: float = 0.045         # How far the foot reaches
+const FIGURE_KICK_POWER_SCALE: float = 0.8      # Tunable shot-power multiplier
+const BALL_MIN_BOUNCE_SPEED: float = 0.2        # Floor after figure collision
 ```
 
-**New methods:**
-- `_setup_bars()` - Spawn 8 bars into P1Bars/P2Bars nodes
-- `_init_bar_states()` - Initialize state array
-- `_on_bar_input(player, rot_delta, slide_delta)` - Update state from input
-- `_on_bar_released(player)` - (empty, reset handled in update)
-- `_update_bar_resets(dt)` - Smooth return-to-vertical for inactive bars
-- `_update_bar_visuals()` - Sync bar node transforms from state
+### Step 2: Extend `table.gd::get_wall_segments()`
 
-**Bar positions:**
-- P1 bars: Use BAR_POSITIONS_P1 directly [-0.50, -0.38, -0.15, 0.05]
-- P2 bars: Mirror P1 positions [0.50, 0.38, 0.15, -0.05] (negate and reverse order)
+Append goal-box back + two side walls for each goal (6 new segments total). Inward normals:
 
-**Modified _ready():**
+- **Left goal back** at `x = -half_l - GOAL_DEPTH`, normal `Vector2(1, 0)`
+- **Left goal top side** from `(-half_l, half_goal)` to `(-half_l - GOAL_DEPTH, half_goal)`, normal `Vector2(0, -1)`
+- **Left goal bottom side** mirrored, normal `Vector2(0, 1)`
+- **Right goal back** at `x = half_l + GOAL_DEPTH`, normal `Vector2(-1, 0)`
+- **Right goal top side**, normal `Vector2(0, -1)`
+- **Right goal bottom side**, normal `Vector2(0, 1)`
+
+### Step 3: Rewrite `physics_world.gd`
+
+**Properties:**
+- `ball_pos: Vector2`, `ball_vel: Vector2`, `ball_radius: float`
+- `wall_segments: Array` (from table)
+- `goal_zones: Array` (from `table.get_goal_rects()`)
+- `bar_states: Array` (reference, owned by game)
+- `bar_nodes: Array` (reference, owned by game)
+- `goal_scored: int` (-1 / 0 / 1, set during `step()`)
+
+**New `initialize` signature:**
+```gdscript
+func initialize(table: Node, p_bar_states: Array, p_bar_nodes: Array) -> void:
+    wall_segments = table.get_wall_segments()
+    goal_zones = table.get_goal_rects()
+    bar_states = p_bar_states
+    bar_nodes = p_bar_nodes
+```
+
+**New `step(dt)`:**
+```gdscript
+func step(dt: float) -> void:
+    goal_scored = -1
+    _apply_friction()
+    _move_and_collide(dt)
+    _check_goals()
+    _clamp_speed()
+```
+
+**Methods to implement (per plan 03):**
+- `_apply_friction()` — `ball_vel *= BALL_FRICTION`; zero if `length_squared() < 0.0001`
+- `_clamp_speed()` — cap at `BALL_MAX_SPEED`
+- `_move_and_collide(dt)` — iterative swept solver (up to 5 substeps); picks earliest of wall/figure hits, advances ball to safe_t, reflects, recurses with remaining dt
+- `_swept_circle_segment(...)` — distance-to-line + endpoint fallback to `_swept_circle_point`
+- `_swept_circle_point(...)` — quadratic ray-vs-expanded-circle
+- `_check_figure_collisions(pos, move)` — loops `bar_nodes[i]`; skips bar if `cos(rotation) < 0.1` (figures raised); for each figure, builds AABB whose X half-width grows with `|sin(rotation)| * FIGURE_FOOT_LENGTH`; tests with `_swept_circle_aabb`
+- `_swept_circle_aabb(...)` — slab-based ray-vs-expanded-AABB
+- `_resolve_figure_collision(hit)` — reflect normal, add `hit.normal * abs(rotation_speed) * FIGURE_FOOT_LENGTH * FIGURE_KICK_POWER_SCALE`, enforce `BALL_MIN_BOUNCE_SPEED`, clamp
+- `_check_goals()` — `goal_zones[0]` (left) = P2 scored, `goal_zones[1]` (right) = P1 scored
+- `_reflect(vel, normal)` — `vel - 2 * vel.dot(normal) * normal`
+- `reset_ball()` — zero pos/vel, clear `goal_scored`
+
+**Determinism notes for Phase 06 prep:** prefer squared-distance comparisons where possible; avoid Dictionary allocations in hot path (consider Array tuples or pre-allocated state). Acceptable to use floats for Phase 03 — Phase 06 does the fixed-point pass.
+
+### Step 4: Update `ball.gd` for visual rolling
+
+```gdscript
+func update_rotation(vel: Vector2, dt: float) -> void:
+    if vel.length_squared() < 0.0001:
+        return
+    var speed: float = vel.length()
+    var spin: float = speed * dt / Constants.BALL_RADIUS  # rolling: ω = v/r
+    rotate_x(spin * sign(vel.y))
+    rotate_z(-spin * sign(vel.x))
+```
+
+Cosmetic only — does not feed back into physics.
+
+### Step 5: Wire `game.gd` to new physics API
+
+**Modified `_ready()`:**
 ```gdscript
 func _ready() -> void:
     _setup_input_handler()
     _setup_bars()
     _init_bar_states()
-    physics_world.initialize(table)
+    physics_world.initialize(table, bar_states, bars)
     reset_ball()
 ```
 
-**Modified _physics_process():**
+**Modified `_physics_process(delta)`:**
 ```gdscript
 func _physics_process(delta: float) -> void:
     _update_bar_resets(delta)
     _update_bar_visuals()
-    physics_world.step()
+    physics_world.step(Constants.PHYSICS_DT)
+    if physics_world.goal_scored >= 0:
+        _on_goal(physics_world.goal_scored)
     ball.update_position(physics_world.get_ball_3d_position())
+    ball.update_rotation(physics_world.ball_vel, Constants.PHYSICS_DT)
 ```
 
----
-
-## Constants Already Defined (in constants.gd)
-
+**New `_on_goal(scorer)`:**
 ```gdscript
-const BAR_POSITIONS_P1: Array = [-0.50, -0.38, -0.15, 0.05]
-const BAR_FIGURE_COUNTS: Array = [1, 2, 5, 3]
-const BAR_SLIDE_RANGE: float = 0.10
-const BAR_MAX_ROTATION_SPEED: float = 20.0
-const BAR_ROTATION_RESET_SPEED: float = 10.0
-const TABLE_SURFACE_Y: float = 0.75
-const TABLE_WIDTH: float = 0.68
-const PLAYER_1: int = 0
-const PLAYER_2: int = 1
+func _on_goal(scorer: int) -> void:
+    GameManager.goal_scored(scorer)
+    reset_ball()
 ```
+
+Match-end / kickoff-delay polish is deferred to Phase 04.
+
+**`reset_ball()` already exists** — zero `ball_pos`/`ball_vel` and place visual at center. No change needed.
 
 ---
 
 ## Verification Checklist
 
-After implementation, verify:
-- [ ] All 8 bars visible on table with correct figure counts (1,2,5,3 per side)
-- [ ] P1 figures are red, P2 figures are blue
-- [ ] Keys 1-4 switch active bar (visual indicator shows which)
-- [ ] Hold left mouse + move left/right: bar rotates
-- [ ] Hold left mouse + move up/down: bar slides along its axis
-- [ ] Release mouse: bar smoothly returns to vertical
-- [ ] Bar slide is clamped (can't go off table)
-- [ ] Rods are visible spanning the table width
-- [ ] P2 bars don't respond to input (correct for local P1 testing)
+After implementation, verify by running the project and using a temporary debug action (e.g., a key that calls `physics_world.ball_vel = Vector2(2.0, 0.3)`) to inject motion:
+
+- [ ] Ball with velocity slides across table and slows to a halt (friction works)
+- [ ] Ball bounces off top/bottom walls realistically
+- [ ] Ball bounces off left/right walls outside goal openings
+- [ ] Ball entering goal opening passes through and stops inside goal box
+- [ ] HUD score increments when ball enters a goal
+- [ ] Ball resets to center after a goal
+- [ ] Swinging a vertical-pointed bar into the ball pushes the ball away
+- [ ] Fast bar rotation = faster shot than slow rotation (rotation_speed matters)
+- [ ] Bar with figures pointing up (rotation ≈ π) doesn't collide with the ball
+- [ ] Ball never tunnels through walls or figures, even at high speed
+- [ ] Ball mesh visually rolls in the direction of motion
 
 ---
 
 ## File Change Summary
 
-| File | Action | Lines (approx) |
-|------|--------|----------------|
-| `scripts/game/bar.gd` | Rewrite | ~120 |
-| `scenes/game/bar.tscn` | Create | ~40 |
-| `scripts/game/input_handler.gd` | Create | ~50 |
-| `scripts/game/game.gd` | Modify | +80 |
+| File | Action | Approx LOC |
+|------|--------|------------|
+| `scripts/game/physics_world.gd` | Rewrite | ~180 |
+| `scripts/game/table.gd` | Add 6 wall segments | +30 |
+| `scripts/game/game.gd` | Wire new API, goal handler | +10 |
+| `scripts/game/ball.gd` | Add `update_rotation` | +8 |
+| `scripts/autoload/constants.gd` | Add figure-collision block | +6 |
 
 ---
 
 ## Notes
 
-- Figure meshes are placeholder boxes (proper 3D models in Phase 08)
-- Mouse sensitivity values may need tuning through playtesting
-- Rotation is unclamped (360° spinning allowed - common foosball technique)
-- rotation_speed tracked for shot power calculation in Phase 03
-- Input structure designed to be network-friendly for Phase 06
+- This is the hottest code path in the project. At 120 Hz with future rollback (Phase 06, up to 10 frame re-sims), the loop can run 1200 times per second. Keep allocations out of `_move_and_collide` if reasonably possible — pre-size temporaries where it helps.
+- Trig (`sin`, `cos`) is used for figure foot-reach. Phase 06 will replace this with a lookup table or fixed-point approximation for determinism. Acceptable for Phase 03.
+- Floor-state ("ball stopped") is handled by zeroing velocity below a threshold so it doesn't drift forever — keep the threshold tight, or "soft tap from figure" tests fail.
+- Goal detection currently uses `Rect2.has_point(ball_pos)` — center-point check, ignores ball radius. Sufficient for Phase 03; tighten in Phase 04 polish if needed.
+- After Phase 03, Phase 04 layers the match state machine (KICKOFF / PLAYING / GOAL_SCORED / MATCH_END) on top, including a kickoff delay and goal celebration freeze.

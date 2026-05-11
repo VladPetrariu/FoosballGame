@@ -49,6 +49,43 @@ func get_wall_segments() -> Array:
 		"normal": Vector2(-1, 0)
 	})
 
+	# Goal box interior walls so the ball settles inside after scoring
+	var depth = Constants.GOAL_DEPTH
+
+	# Left goal: back wall + top + bottom
+	segments.append({
+		"start": Vector2(-half_l - depth, half_goal),
+		"end": Vector2(-half_l - depth, -half_goal),
+		"normal": Vector2(1, 0)
+	})
+	segments.append({
+		"start": Vector2(-half_l, half_goal),
+		"end": Vector2(-half_l - depth, half_goal),
+		"normal": Vector2(0, -1)
+	})
+	segments.append({
+		"start": Vector2(-half_l - depth, -half_goal),
+		"end": Vector2(-half_l, -half_goal),
+		"normal": Vector2(0, 1)
+	})
+
+	# Right goal: back wall + top + bottom
+	segments.append({
+		"start": Vector2(half_l + depth, half_goal),
+		"end": Vector2(half_l + depth, -half_goal),
+		"normal": Vector2(-1, 0)
+	})
+	segments.append({
+		"start": Vector2(half_l, half_goal),
+		"end": Vector2(half_l + depth, half_goal),
+		"normal": Vector2(0, -1)
+	})
+	segments.append({
+		"start": Vector2(half_l + depth, -half_goal),
+		"end": Vector2(half_l, -half_goal),
+		"normal": Vector2(0, 1)
+	})
+
 	return segments
 
 # Returns two Rect2 for goal detection zones (in XZ plane).

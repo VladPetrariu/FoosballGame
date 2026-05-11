@@ -18,15 +18,18 @@ func _ready() -> void:
 	_setup_input_handler()
 	_setup_bars()
 	_init_bar_states()
-	physics_world.initialize(table)
+	physics_world.initialize(table, bar_states, bars)
 	reset_ball()
 
 
 func _physics_process(delta: float) -> void:
 	_update_bar_resets(delta)
 	_update_bar_visuals()
-	physics_world.step()
+	physics_world.step(Constants.PHYSICS_DT)
+	if physics_world.goal_scored >= 0:
+		_on_goal(physics_world.goal_scored)
 	ball.update_position(physics_world.get_ball_3d_position())
+	ball.update_rotation(physics_world.ball_vel, Constants.PHYSICS_DT)
 
 
 func _setup_input_handler() -> void:
@@ -80,8 +83,8 @@ func _on_bar_input(player: int, rot_delta: float, slide_delta: float) -> void:
 		state.rotation_speed = rot_delta / Constants.PHYSICS_DT
 		state.z_offset = clampf(
 			state.z_offset + slide_delta,
-			-Constants.BAR_SLIDE_RANGE,
-			Constants.BAR_SLIDE_RANGE
+			-bar_node.slide_range,
+			bar_node.slide_range
 		)
 
 
@@ -134,7 +137,11 @@ func _update_bar_visuals() -> void:
 		bar_node.update_selection_visual()
 
 
+func _on_goal(scorer: int) -> void:
+	GameManager.goal_scored(scorer)
+	reset_ball()
+
+
 func reset_ball() -> void:
-	physics_world.ball_pos = Vector2.ZERO
-	physics_world.ball_vel = Vector2.ZERO
+	physics_world.reset_ball()
 	ball.update_position(physics_world.get_ball_3d_position())

@@ -7,6 +7,7 @@ var rotation_angle: float = 0.0
 var rotation_speed: float = 0.0
 var figure_count: int = 1
 var figure_base_positions: Array = []
+var slide_range: float = 0.0
 var is_selected: bool = false
 
 @onready var rod: MeshInstance3D = $Rod
@@ -23,6 +24,15 @@ func setup(p_player: int, p_bar_index: int, p_x_pos: float, p_fig_count: int) ->
 	_setup_rod()
 	_setup_selection_indicator()
 	_create_figures()
+	_compute_slide_range()
+
+
+func _compute_slide_range() -> void:
+	# Outermost figure on the bar should be able to reach the wall edge.
+	var max_abs_z: float = 0.0
+	for z in figure_base_positions:
+		max_abs_z = max(max_abs_z, abs(z))
+	slide_range = Constants.TABLE_WIDTH / 2.0 - max_abs_z
 
 
 func _setup_rod() -> void:
@@ -71,9 +81,9 @@ func _make_figure_mesh() -> Node3D:
 	var fig := Node3D.new()
 	var body := MeshInstance3D.new()
 	var mesh := BoxMesh.new()
-	mesh.size = Vector3(0.015, 0.05, 0.02)
+	mesh.size = Vector3(0.03, 0.08, 0.035)
 	body.mesh = mesh
-	body.position.y = -0.025
+	body.position.y = -0.04
 
 	var mat := StandardMaterial3D.new()
 	if player == Constants.PLAYER_1:
